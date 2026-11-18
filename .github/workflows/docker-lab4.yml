@@ -1,0 +1,67 @@
+name: Lab 4 Docker Build and Test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  docker-build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build baseline image
+        run: |
+          docker build -f Dockerfile.baseline -t iris-api:baseline .
+
+      - name: Build optimised slim image
+        run: |
+          docker build -f Dockerfile -t iris-api:slim .
+
+      - name: Compare image sizes
+        run: |
+          echo "Docker image sizes:"
+          docker image ls iris-api
+
+          BASE=$(docker image inspect iris-api:baseline --format='{{.Size}}')
+          SLIM=$(docker image inspect iris-api:slim --format='{{.Size}}')
+
+          python -c "b=$BASE; s=$SLIM; print(f'Baseline: {b / 1048576:.2f} MB'); print(f'Slim: {s / 1048576:.2f} MB'); print(f'Reduction: {(b-s)/b*100:.2f}%')"
+
+      - name: Test baseline container
+        run: |
+          docker run -d --name iris-baseline -p 8000:8000 iris-api:baseline
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/health; then
+              break
+            fi
+            sleep 2
+          done
+
+          curl -fsS http://127.0.0.1:8000/v1/predict             -H "Content-Type: application/json"             -d '{"sepal_length":5.1,"sepal_width":3.5,"petal_length":1.4,"petal_width":0.2}'
+
+          docker stop iris-baseline
+          docker rm iris-baseline
+
+      - name: Test optimised container
+        run: |
+          docker run -d --name iris-slim -p 8000:8000 iris-api:slim
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/health; then
+              break
+            fi
+            sleep 2
+          done
+
+          curl -fsS http://127.0.0.1:8000/v1/predict             -H "Content-Type: application/json"             -d '{"sepal_length":5.1,"sepal_width":3.5,"petal_length":1.4,"petal_width":0.2}'
+
+          docker stop iris-slim
+          docker rm iris-slim
